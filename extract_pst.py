@@ -13,25 +13,67 @@ import os
 import re
 import sys
 import argparse
-import io
+import tempfile
 from email import message_from_string
 from email.utils import parsedate_to_datetime
 
+import io
+import shutil
+import subprocess
+
 try:
-    import pdfplumber
-    _HAS_PDFPLUMBER = True
+    import pdfplumber as _pdfplumber
 except ImportError:
-    _HAS_PDFPLUMBER = False
+    _pdfplumber = None
+
+try:
+    import docx2txt as _docx2txt
+except ImportError:
+    _docx2txt = None
+
+# Locate antiword — it ships with Git for Windows but lives outside the normal PATH
+_ANTIWORD = shutil.which("antiword") or shutil.which("antiword.exe") or (
+    r"C:\Program Files\Git\mingw64\bin\antiword.exe"
+    if os.path.exists(r"C:\Program Files\Git\mingw64\bin\antiword.exe") else None
+)
+
+_EXTRACTABLE_EXTENSIONS = {".pdf", ".doc", ".docx"}
 
 
-def _extract_pdf_text(data: bytes) -> str:
-    if not _HAS_PDFPLUMBER:
+def _extract_attachment_text(data: bytes, filename: str) -> str:
+    ext = os.path.splitext(filename)[1].lower()
+    if ext not in _EXTRACTABLE_EXTENSIONS:
         return ""
     try:
-        with pdfplumber.open(io.BytesIO(data)) as pdf:
-            return "\n".join(page.extract_text() or "" for page in pdf.pages).strip()
-    except Exception:
-        return ""
+        if ext == ".pdf":
+            if _pdfplumber is None:
+                return ""
+            with _pdfplumber.open(io.BytesIO(data)) as pdf:
+                return "\n".join(p.extract_text() or "" for p in pdf.pages).strip()
+
+        # Write to temp file for tools that need a path
+        with tempfile.NamedTemporaryFile(suffix=ext, delete=False) as tmp:
+            tmp.write(data)
+            tmp_path = tmp.name
+        try:
+            if ext == ".docx":
+                if _docx2txt is None:
+                    return ""
+                return (_docx2txt.process(tmp_path) or "").strip()
+
+            if ext == ".doc":
+                if _ANTIWORD is None:
+                    return ""
+                result = subprocess.run(
+                    [_ANTIWORD, tmp_path],
+                    capture_output=True,
+                )
+                return result.stdout.decode("utf-8", errors="replace").strip()
+        finally:
+            os.unlink(tmp_path)
+    except Exception as e:
+        print(f"  Warning: could not extract text from {filename!r}: {e}")
+    return ""
 
 
 def _parse_mime_body(raw: str) -> tuple:
@@ -49,8 +91,7 @@ def _parse_mime_body(raw: str) -> tuple:
             boundary = line[2:]
             break
         if line and not line.startswith("--"):
-            # Preamble line — keep looking for boundary
-            continue
+            continue  # preamble text — keep scanning
 
     if boundary:
         # Synthesize envelope so message_from_string can parse it
@@ -83,8 +124,9 @@ def _parse_mime_body(raw: str) -> tuple:
             if payload is None:
                 continue
             entry = {"filename": filename or "unnamed", "size": len(payload)}
-            if (filename or "").lower().endswith(".pdf"):
-                entry["pdf_text"] = _extract_pdf_text(payload)
+            ext = os.path.splitext(filename or "")[1].lower()
+            if ext in _EXTRACTABLE_EXTENSIONS:
+                entry["attachment_text"] = _extract_attachment_text(payload, filename)
             attachments.append(entry)
         elif ct == "text/plain":
             payload = part.get_payload(decode=True)
