@@ -145,8 +145,15 @@ def safe_get(fn, default=""):
         return default
 
 
+def parse_header_field(headers, field):
+    """Extract a single header field value from raw transport headers."""
+    if not headers:
+        return ""
+    m = re.search(rf"^{field}:\s*(.+)$", headers, re.IGNORECASE | re.MULTILINE)
+    return m.group(1).strip() if m else ""
+
+
 def parse_sender_email(headers):
-    """Extract the From address from raw transport headers."""
     if not headers:
         return ""
     m = re.search(r"^From:\s*<?([^>\r\n]+?)>?\s*$", headers, re.IGNORECASE | re.MULTILINE)
@@ -159,6 +166,8 @@ def extract_message(message):
 
     headers = safe_get(message.get_transport_headers)
     sender_email = parse_sender_email(headers)
+    to = parse_header_field(headers, "To")
+    cc = parse_header_field(headers, "Cc")
 
     # Prefer delivery_time (receive), fall back to client_submit_time (send), then Date: header
     delivery_time = ""
@@ -213,6 +222,8 @@ def extract_message(message):
         "subject": subject,
         "sender_name": sender_name,
         "sender_email": sender_email,
+        "to": to,
+        "cc": cc,
         "delivery_time": delivery_time,
         "plain_body": plain_body,
         "attachments": attachments,
@@ -238,6 +249,8 @@ def walk_folder(folder, folder_path, output_dir, summary_rows):
                     "subject": data["subject"],
                     "sender_name": data["sender_name"],
                     "sender_email": data["sender_email"],
+                    "to": data["to"],
+                    "cc": data["cc"],
                     "delivery_time": data["delivery_time"],
                     "num_attachments": len(data["attachments"]),
                 })
@@ -282,7 +295,7 @@ def extract_pst(pst_path, output_dir):
     # Write summary CSV
     csv_path = os.path.join(output_dir, "summary.csv")
     if summary_rows:
-        fieldnames = ["folder", "subject", "sender_name", "sender_email", "delivery_time", "num_attachments"]
+        fieldnames = ["folder", "subject", "sender_name", "sender_email", "to", "cc", "delivery_time", "num_attachments"]
         with open(csv_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
