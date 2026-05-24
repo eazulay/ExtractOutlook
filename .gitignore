@@ -1,4 +1,6 @@
+*.env
 *.pst
-*.json
 *.csv
 *.xlsx
+extracted_emails/
+email_summaries/
