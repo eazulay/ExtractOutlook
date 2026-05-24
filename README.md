@@ -58,3 +58,37 @@ One row per email with columns: `folder`, `subject`, `sender_name`, `sender_emai
 - `.doc` — `antiword` (subprocess)
 - `.docx` — `docx2txt` (Python)
 - `.pdf` — `pdfplumber` (Python)
+
+## Summarizing emails with Claude
+
+`summarize_emails.py` reads the JSON files produced by `extract_pst.py`, sends each one to Claude Haiku 4.5, and collects the results as markdown tables and an Excel workbook.
+
+**Additional requirements**
+
+```
+pip install anthropic python-dotenv openpyxl
+```
+
+Set `ANTHROPIC_API_KEY` in your environment or in a `.env` file.
+
+**Usage**
+
+```
+python summarize_emails.py [--input-dir <dir>] [--output-dir <dir>] [--xlsx <path>] [--overwrite] [--xlsx-only]
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--input-dir` | `extracted_emails/` | Directory containing the JSON files from `extract_pst.py` |
+| `--output-dir` | `email_summaries/` | Where per-folder markdown summaries are written |
+| `--xlsx` | `claude_summary.xlsx` | Path for the aggregated Excel output |
+| `--overwrite` | off | Re-process files that already have a markdown summary |
+| `--xlsx-only` | off | Skip Claude calls; rebuild the Excel file from existing markdown |
+
+**Output**
+
+For each JSON file the script writes a markdown file to `--output-dir` containing a table with columns: `DateTime`, `From`, `To`, `Subject`, and `Summary`. The summary combines the email body and any extracted attachment text into bullet points. All per-folder tables are then merged into a single Excel workbook (`claude_summary.xlsx`) with an added `Folder` column.
+
+## How it works
+
+Each JSON file is sent to Claude Haiku 4.5 with a fixed system prompt that instructs the model to produce a markdown table. Files larger than ~120,000 characters are split into chunks to stay within the Haiku 4.5 rate limits; the resulting tables are concatenated into a single markdown file. The system prompt is marked ephemeral so it is cached across chunks and files, reducing token costs. The SDK is configured with up to 10 retries and exponential back-off to ride out rate-limit windows automatically.
