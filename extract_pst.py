@@ -137,6 +137,18 @@ def _parse_mime_body(raw: str) -> tuple:
     return "\n".join(text_parts).strip(), attachments or None
 
 
+def _build_attachment_content(attachments: list) -> str:
+    if not attachments:
+        return ""
+    parts = []
+    for att in attachments:
+        filename = att.get("filename") or "unnamed"
+        text = att.get("attachment_text", "").strip()
+        header = f"=== {filename} ==="
+        parts.append(f"{header}\n{text}" if text else header)
+    return "\n\n".join(parts)
+
+
 def safe_get(fn, default=""):
     try:
         result = fn()
@@ -226,7 +238,7 @@ def extract_message(message):
         "cc": cc,
         "delivery_time": delivery_time,
         "plain_body": plain_body,
-        "attachments": attachments,
+        "attachment_content": _build_attachment_content(attachments),
     }
 
 
@@ -252,7 +264,10 @@ def walk_folder(folder, folder_path, output_dir, summary_rows):
                     "to": data["to"],
                     "cc": data["cc"],
                     "delivery_time": data["delivery_time"],
-                    "num_attachments": len(data["attachments"]),
+                    "num_attachments": sum(
+                        1 for line in data["attachment_content"].splitlines()
+                        if line.startswith("=== ") and line.endswith(" ===")
+                    ),
                 })
             except Exception as e:
                 print(f"  Warning: could not read message {i} in '{current_path}': {e}")
